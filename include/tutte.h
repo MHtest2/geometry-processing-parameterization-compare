@@ -15,5 +15,6 @@
 void tutte(
   const Eigen::MatrixXd & V,
   const Eigen::MatrixXi & F,
+  const int & mode,
   Eigen::MatrixXd & U);
 #endif

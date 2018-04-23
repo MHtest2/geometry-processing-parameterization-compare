@@ -4,6 +4,9 @@
 #include <igl/boundary_loop.h>
 #include <igl/map_vertices_to_circle.h>
 #include <igl/min_quad_with_fixed.h>
+#include <igl/edge_lengths.h>
+#include <igl/cotmatrix.h>
+
 #include <iostream>
 
 using namespace std;
@@ -35,9 +38,99 @@ void graph_Laplacian(
   }
 }
 
+void edge_weighted_Laplacian(
+  const Eigen::MatrixXd & l,
+  const Eigen::MatrixXi & F,
+  Eigen::SparseMatrix<double> & L)
+{
+  // Unknown effect of added distance to all points
+  double epsilon = 0.00; 
+
+  // Unknown effect of lower bounding the edge lengths
+  double edge_threshold = 0.0000;
+
+  // For debugging
+  double all_edge_differences = 0;
+  int edges_added = 0;
+  // Slightly redundant since logic is now edge-wise
+  // Will simply overwrite each half-edge double-visited
+  for (int faceIndex = 0; faceIndex < F.rows(); faceIndex++){
+    auto vertices = F.row(faceIndex);
+    // Indices
+    int v1 = vertices[0];
+    int v2 = vertices[1];
+    int v3 = vertices[2];
+
+    // Lengths of [1,2],[2,0],[0,1]
+    // Lengths of [v2, v3], [v3, v1], [v1 , v2]
+    auto lengths = l.row(faceIndex);
+    // Side lengths
+    double s1 = lengths[0];
+    double s2 = lengths[1];
+    double s3 = lengths[2];
+
+    if (s1 <= 0 or s2 <= 0 or s3 <= 0)
+    {
+      cout << "Assumption of positive side length violated!" << endl;
+    }
+
+    if (L.coeffRef(v1, v2) == 0)
+    {
+      if (s3 > edge_threshold)
+      {
+        // Side 1 and 2
+        L.coeffRef(v1, v2) = 1.0 / (s3 + epsilon);
+        L.coeffRef(v2, v1) = 1.0 / (s3 + epsilon);
+        all_edge_differences += s3;
+        edges_added += 1;        
+      }
+    }
+
+    if (L.coeffRef(v2, v3) == 0)
+    {
+      if (s1 > edge_threshold) 
+      {
+        // Side 2 and 3
+        L.coeffRef(v2, v3) = 1.0 / (s1 + epsilon);
+        L.coeffRef(v3, v2) = 1.0 / (s1 + epsilon);
+        all_edge_differences += s1;
+        edges_added += 1;
+      }
+    }
+
+    if (L.coeffRef(v1, v3) == 0)
+    {
+      if (s2 > edge_threshold) 
+      {
+        // Side 3 and 1
+        L.coeffRef(v1, v3) = 1.0 / (s2 + epsilon);
+        L.coeffRef(v3, v1) = 1.0 / (s2 + epsilon);
+        all_edge_differences += s2;
+        edges_added += 1;
+      }
+    }
+  }
+
+  // Special Cases
+  if (edge_threshold > 0) {
+    cout << "Edges added: " << edges_added << endl;
+  }
+  if (epsilon > 0) {
+    cout << "Average edge length: " << all_edge_differences / edges_added << endl;
+  }
+
+  // Set up Laplacian equality: what leaves a node, enters it
+  for (int diagIndex = 0; diagIndex < L.rows(); diagIndex++){
+    // for some reason cannot actually edit the .diagonal()
+    L.coeffRef(diagIndex, diagIndex) = -1 * L.row(diagIndex).sum();
+  }
+}
+
+
 void tutte(
   const Eigen::MatrixXd & V,
   const Eigen::MatrixXi & F,
+  const int & mode,
   Eigen::MatrixXd & U)
 {
   int number_of_vertices = V.rows();
@@ -46,13 +139,24 @@ void tutte(
 
   ////// Obtain Q and B ////// 
   
-  // The Graph Laplacian is our nxn matrix "Q" that appears in the quadratic form
-  // Obtain graph edges "E"
-  Eigen::MatrixXi E;
-  igl::edges(F, E);
-  // Construct the Graph Laplacian from edges
+  // Construct the Laplacian
   Eigen::SparseMatrix<double> Q(number_of_vertices, number_of_vertices);
-  graph_Laplacian(E, Q);
+
+  if (mode == 0){
+    // Obtain graph edges "E"
+    Eigen::MatrixXi E;
+    igl::edges(F, E);
+    graph_Laplacian(E, Q);
+  }
+  else if (mode == 1){
+    Eigen::MatrixXd edge_lengths;
+    igl::edge_lengths(V, F, edge_lengths);
+    edge_weighted_Laplacian(edge_lengths, F, Q);
+  }
+  else if (mode == 2){
+    igl::cotmatrix(V, F, Q);
+  }
+
   // A Graph Laplacian always has at least one 0 eigen value, so it's not PD
   auto positive_definite = false;        
   // "B" is a n×1 vector of linear coefficients. We have none (all zero).

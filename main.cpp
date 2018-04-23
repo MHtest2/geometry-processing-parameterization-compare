@@ -1,5 +1,4 @@
 #include "tutte.h"
-#include "lscm.h"
 #include <igl/read_triangle_mesh.h>
 #include <igl/per_vertex_normals.h>
 #include <igl/viewer/Viewer.h>
@@ -7,10 +6,12 @@
 #include <string>
 #include <iostream>
 
+using namespace std;
+
 int main(int argc, char *argv[])
 {
   // Load input meshes
-  Eigen::MatrixXd V,U_lscm,U_tutte,U;
+  Eigen::MatrixXd V, U_tutte_e, U_tutte_g, U_tutte_t, U;
   Eigen::MatrixXi F;
   igl::read_triangle_mesh(
     (argc>1?argv[1]:"../shared/data/beetle.obj"),V,F);
@@ -18,11 +19,15 @@ int main(int argc, char *argv[])
   std::cout<<R"(
 [space]  Toggle whether displaying 3D surface or 2D parameterization
 C,c      Toggle checkerboard
-t        Switch parameterization to Tutte embedding
-l        Switch parameterization to Least squares conformal mapping
+g        Switch parameterization to Tutte embedding (Graph Laplacian)
+e        [DEFAULT] Switch parameterization to Tutte embedding (Edge-weighted Graph Laplacian)
+t        Switch parameterization to Tutte embedding (Cotangent Laplacian)
 )";
-  tutte(V,F,U_tutte);
-  lscm(V,F,U_lscm);
+
+  tutte(V, F, 0, U_tutte_g);
+  tutte(V, F, 1, U_tutte_e);
+  tutte(V, F, 2, U_tutte_t);
+
   // Fit parameterization in unit sphere
   const auto normalize = [](Eigen::MatrixXd &U)
   {
@@ -31,8 +36,9 @@ l        Switch parameterization to Least squares conformal mapping
       (U.colwise().maxCoeff() - U.colwise().minCoeff()).maxCoeff()/2.0;
   };
   normalize(V);
-  normalize(U_tutte);
-  normalize(U_lscm);
+  normalize(U_tutte_g);
+  normalize(U_tutte_e);
+  normalize(U_tutte_t);
 
   bool plot_parameterization = false;
   const auto & update = [&]()
@@ -58,11 +64,14 @@ l        Switch parameterization to Least squares conformal mapping
       case ' ':
         plot_parameterization ^= 1;
         break;
-      case 'l':
-        U = U_lscm;
+      case 'e':
+        U = U_tutte_e;
+        break;
+      case 'g':
+        U = U_tutte_g;
         break;
       case 't':
-        U = U_tutte;
+        U = U_tutte_t;
         break;
       case 'C':
       case 'c':
@@ -75,7 +84,7 @@ l        Switch parameterization to Least squares conformal mapping
     return true;
   };
 
-  U = U_tutte;
+  U = U_tutte_e;
   viewer.data.set_mesh(V,F);
   Eigen::MatrixXd N;
   igl::per_vertex_normals(V,F,N);
